@@ -565,7 +565,7 @@
     margin-bottom: 6px;
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     -webkit-background-clip: text;
-dorPrefix)    -webkit-text-fill-color: transparent;
+    -webkit-text-fill-color: transparent;
   }
 
   .welcome-text {
@@ -873,24 +873,37 @@ dorPrefix)    -webkit-text-fill-color: transparent;
         body: JSON.stringify(body),
       });
 
-      const data = await res.json();
+      let data;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        data = {
+          response: `⚠️ Server error: ${text || 'Unknown error'}. This may be due to API rate limits. Please wait and try again.`,
+          session_id: sessionId,
+          error_type: 'server_error',
+        };
+      }
       hideTyping();
 
       if (data.response) {
+    if (data.session_id && typeof data.session_id === 'string') {
         sessionId = data.session_id;
         document.getElementById('sessionDisplay').textContent = `session: ${sessionId.slice(0,8)}...`;
-        addMessage('agent', data.response);
+    }
+    addMessage('agent', data.response);
+    if (!data.error_type) {
         setTimeout(loadTasks, 800);
-      } else {
-        addMessage('agent', 'Something went wrong. Please try again.');
-      }
+    }
+} else {
+    addMessage('agent', 'Something went wrong. Please try again.');
+}
     } catch (e) {
       hideTyping();
-      addMessage('agent', `Connection error: ${e.message}`);
+      addMessage('agent', 'Connection error. Please check your API URL.');
     }
-
     document.getElementById('sendBtn').disabled = false;
-    document.getElementById('msgInput').focus();
   }
 
   function setFilter(filter, btn) {

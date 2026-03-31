@@ -9,7 +9,10 @@ from app.models import Task, TaskStatus, TaskPriority
 from app.agents.coordinator import run_coordinator
 from app.config import settings
 import uuid
+from fastapi.responses import JSONResponse
+import traceback, logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── Auth dependency ───────────────────────────────────────────────────────────
@@ -57,15 +60,42 @@ class QueryResponse(BaseModel):
 # ── Natural language query endpoint ──────────────────────────────────────────
 
 @router.post("/query", response_model=QueryResponse)
-async def query(
-    req: QueryRequest,
+async def query_agent(
+    request: QueryRequest,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_api_key),
 ):
-    """Send a natural language message to the coordinator agent."""
-    session_id = req.session_id or str(uuid.uuid4())
-    response = await run_coordinator(req.message, session_id, db)
-    return QueryResponse(response=response, session_id=session_id)
+    try:
+        session_id = request.session_id or str(uuid.uuid4())
+        response = await run_coordinator(request.message, session_id, db)
+        return {"response": response, "session_id": session_id}
+
+    except Exception as e:
+        error_message = str(e).lower()
+        logger.error(f"Query error: {e}\n{traceback.format_exc()}")
+
+        if any(k in error_message for k in [
+            "429", "resource_exhausted", "rate limit", "quota",
+            "too many requests", "resourceexhausted"
+        ]):
+            return JSONResponse(status_code=429, content={
+                "response": "⚠️ Gemini API rate limit reached. Please wait a moment and try again.",
+                "session_id": request.session_id,
+                "error_type": "rate_limit",
+            })
+
+        if any(k in error_message for k in ["401", "403", "api_key", "unauthorized"]):
+            return JSONResponse(status_code=503, content={
+                "response": "⚠️ AI service authentication error. Check API key.",
+                "session_id": request.session_id,
+                "error_type": "auth_error",
+            })
+
+        return JSONResponse(status_code=500, content={
+            "response": f"⚠️ Error: {str(e)[:200]}",
+            "session_id": request.session_id,
+            "error_type": "internal_error",
+        })
 
 # ── Direct CRUD endpoints ─────────────────────────────────────────────────────
 

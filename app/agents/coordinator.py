@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
 from google.adk.agents import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -63,15 +64,22 @@ Always respond in a friendly, concise manner.""",
     )
 
     response_text = ""
-    async for event in runner.run_async(
-        user_id="user",
-        session_id=session_id,
-        new_message=user_message,
-    ):
-        if event.is_final_response() and event.content:
-            for part in event.content.parts:
-                if part.text:
-                    response_text += part.text
+    try:
+        async for event in runner.run_async(
+            user_id="user",
+            session_id=session_id,
+            new_message=user_message,
+        ):
+            if event.is_final_response() and event.content:
+                for part in event.content.parts:
+                    if part.text:
+                        response_text += part.text
+    except ResourceExhausted as e:
+        raise Exception("429 RATE_LIMIT: Gemini API rate limit exceeded.") from e
+    except ServiceUnavailable as e:
+        raise Exception("503 SERVICE_UNAVAILABLE: Gemini unavailable.") from e
+    
+        
 
     history_entry = {
         "user": message,
