@@ -888,17 +888,17 @@
       hideTyping();
 
       if (data.response) {
-    if (data.session_id && typeof data.session_id === 'string') {
-        sessionId = data.session_id;
-        document.getElementById('sessionDisplay').textContent = `session: ${sessionId.slice(0,8)}...`;
-    }
-    addMessage('agent', data.response);
-    if (!data.error_type) {
-        setTimeout(loadTasks, 800);
-    }
-} else {
-    addMessage('agent', 'Something went wrong. Please try again.');
-}
+        if (data.session_id && typeof data.session_id === 'string') {
+          sessionId = data.session_id;
+          document.getElementById('sessionDisplay').textContent = `session: ${sessionId.slice(0,8)}...`;
+        }
+        addMessage('agent', data.response);
+        if (!data.error_type) {
+          setTimeout(loadTasks, 800);
+        }
+      } else {
+        addMessage('agent', 'Something went wrong. Please try again.');
+      }
     } catch (e) {
       hideTyping();
       addMessage('agent', 'Connection error. Please check your API URL.');
