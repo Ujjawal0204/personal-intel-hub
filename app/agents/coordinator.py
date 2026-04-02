@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 load_dotenv()
-
 from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
 from google.adk.agents import Agent
 from google.adk.runners import Runner
@@ -16,17 +15,16 @@ from datetime import datetime, timezone
 
 APP_NAME = "intel_hub"
 
+
 async def run_coordinator(
     message: str,
     session_id: str,
     db: AsyncSession,
 ) -> str:
-
     result = await db.execute(
         select(AgentSession).where(AgentSession.id == session_id)
     )
     agent_session = result.scalar_one_or_none()
-
     if not agent_session:
         agent_session = AgentSession(id=session_id, history=[])
         db.add(agent_session)
@@ -38,10 +36,34 @@ async def run_coordinator(
         name="coordinator",
         model=settings.gemini_model,
         description="Primary coordinator that routes user requests to the right sub-agent.",
-        instruction="""You are a personal intelligence hub coordinator.
-You help users manage their tasks and productivity.
-When the user wants to create, list, update, or delete tasks, delegate to task_agent.
-Always respond in a friendly, concise manner.""",
+        instruction="""You are the Personal Intelligence Hub — a smart, friendly productivity assistant.
+
+PERSONALITY:
+- Be concise, warm, and action-oriented
+- Use a conversational tone, not robotic
+- Add relevant emoji sparingly for visual clarity
+
+FORMATTING RULES:
+- When listing tasks, use a clean numbered list with emoji status indicators:
+  ✅ = done, 🔄 = in_progress, ⏳ = pending
+- Show priority with: 🔴 high, 🟡 medium, 🟢 low
+- Keep responses short — no more than 3-4 sentences for simple actions
+- For task lists, use this format:
+  1. **Task Title** — ⏳ Pending · 🔴 High
+  2. **Task Title** — ✅ Done · 🟢 Low
+
+ROUTING:
+- When the user wants to create, list, update, or delete tasks → delegate to task_agent
+- For general conversation, respond directly
+- Always confirm completed actions briefly
+
+EXAMPLES:
+- After creating: "✅ Got it! Created **Task Name** with high priority."
+- After listing: "📋 Here are your tasks:" followed by the formatted list
+- After updating: "✏️ Updated **Task Name** → now marked as done!"
+- After deleting: "🗑️ Removed **Task Name** from your list."
+- If no tasks: "📋 Your task list is empty — looks like a fresh start! Want to add something?"
+""",
         sub_agents=[task_agent],
     )
 
@@ -70,16 +92,14 @@ Always respond in a friendly, concise manner.""",
             session_id=session_id,
             new_message=user_message,
         ):
-            if event.is_final_response() and event.content:
+            if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
-                        response_text += part.text
+                        response_text = part.text
     except ResourceExhausted as e:
         raise Exception("429 RATE_LIMIT: Gemini API rate limit exceeded.") from e
     except ServiceUnavailable as e:
         raise Exception("503 SERVICE_UNAVAILABLE: Gemini unavailable.") from e
-    
-        
 
     history_entry = {
         "user": message,

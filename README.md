@@ -143,7 +143,7 @@ Create a `.env` file:
 ```
 DATABASE_URL_LOCAL=postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/intel_hub
 GOOGLE_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-2.5-flash-preview-04-17
+GEMINI_MODEL=gemini-2.5-flash
 API_KEY=dev-key
 ENV=local
 ```

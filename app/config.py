@@ -4,7 +4,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     gcp_project_id: str = ""
     gcp_region: str = "us-central1"
-    gemini_model: str = "gemini-2.5-flash-preview-04-17"
+    gemini_model: str = "gemini-2.5-flash"
     api_key: str = "dev-key"
     env: str = "local"
     database_url_local: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/intel_hub"

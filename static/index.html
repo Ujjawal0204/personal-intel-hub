@@ -814,15 +814,26 @@
     return new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
+  function renderMarkdown(text) {
+    let html = text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;font-size:0.9em;">$1</code>')
+      .replace(/\n/g, '<br>');
+    return html;
+  }
+
   function addMessage(role, text) {
     const msgs = document.getElementById('messages');
     const div = document.createElement('div');
     div.className = `message ${role}`;
     const initials = role === 'agent' ? 'AI' : 'ME';
+    const rendered = role === 'agent' ? renderMarkdown(text) : text.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
     div.innerHTML = `
       <div class="avatar ${role}">${initials}</div>
       <div>
-        <div class="bubble">${text}</div>
+        <div class="bubble">${rendered}</div>
         <div class="message-time">${formatTime(new Date())}</div>
       </div>`;
     msgs.appendChild(div);
