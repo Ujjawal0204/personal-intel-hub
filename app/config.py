@@ -1,10 +1,11 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import os
 
 class Settings(BaseSettings):
     gcp_project_id: str = ""
     gcp_region: str = "us-central1"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.0-flash"
     api_key: str = "dev-key"
     env: str = "local"
     database_url_local: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/intel_hub"
@@ -14,6 +15,8 @@ class Settings(BaseSettings):
     def model_post_init(self, __context):
         if not self.database_url:
             object.__setattr__(self, "database_url", self.database_url_local)
+        if self.google_api_key:
+            os.environ["GOOGLE_API_KEY"] = self.google_api_key
 
     class Config:
         env_file = ".env"

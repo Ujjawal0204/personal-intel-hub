@@ -1,113 +1,127 @@
-import os
-from dotenv import load_dotenv
-load_dotenv()
-from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+"""
+Coordinator Agent - routes user queries to the appropriate sub-agent.
+Multi-agent A2A architecture with retry logic for rate limits.
+"""
+
+import logging
+import asyncio
+from datetime import date
 from google.adk.agents import Agent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.genai import types
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.agents.task_agent import build_task_agent
-from app.models import AgentSession
+from google.adk.tools import FunctionTool
+from app.agents.task_agent import task_agent
+from app.agents.schedule_agent import schedule_agent
 from app.config import settings
-from datetime import datetime, timezone
 
-APP_NAME = "intel_hub"
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 1
+RETRY_DELAY = 5
 
 
-async def run_coordinator(
-    message: str,
-    session_id: str,
-    db: AsyncSession,
-) -> str:
-    result = await db.execute(
-        select(AgentSession).where(AgentSession.id == session_id)
-    )
-    agent_session = result.scalar_one_or_none()
-    if not agent_session:
-        agent_session = AgentSession(id=session_id, history=[])
-        db.add(agent_session)
-        await db.commit()
+async def _run_agent_with_retry(agent, message):
+    """Run a sub-agent with retry logic for rate limits."""
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
+    from google.genai.types import Content, Part
 
-    task_agent = build_task_agent(db)
+    for attempt in range(MAX_RETRIES):
+        try:
+            session_service = InMemorySessionService()
+            runner = Runner(agent=agent, app_name="intel_hub", session_service=session_service)
+            session = await session_service.create_session(app_name="intel_hub", user_id="coordinator")
+            user_content = Content(parts=[Part(text=message)], role="user")
 
-    coordinator = Agent(
-        name="coordinator",
-        model=settings.gemini_model,
-        description="Primary coordinator that routes user requests to the right sub-agent.",
-        instruction="""You are the Personal Intelligence Hub — a smart, friendly productivity assistant.
+            response_text = ""
+            async for event in runner.run_async(user_id="coordinator", session_id=session.id, new_message=user_content):
+                if event.is_final_response():
+                    if event.content and event.content.parts:
+                        response_text = event.content.parts[0].text
+                    break
 
-PERSONALITY:
-- Be concise, warm, and action-oriented
-- Use a conversational tone, not robotic
-- Add relevant emoji sparingly for visual clarity
+            return response_text or "Request processed."
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(k in error_str for k in ["429", "rate", "quota", "resource_exhausted"]):
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"Rate limited, retrying in {RETRY_DELAY}s (attempt {attempt+1})")
+                    await asyncio.sleep(RETRY_DELAY)
+                    continue
+            raise
+    return "Rate limit reached after retries. Please wait a moment."
 
-FORMATTING RULES:
-- When listing tasks, use a clean numbered list with emoji status indicators:
-  ✅ = done, 🔄 = in_progress, ⏳ = pending
-- Show priority with: 🔴 high, 🟡 medium, 🟢 low
-- Keep responses short — no more than 3-4 sentences for simple actions
-- For task lists, use this format:
-  1. **Task Title** — ⏳ Pending · 🔴 High
-  2. **Task Title** — ✅ Done · 🟢 Low
 
-ROUTING:
-- When the user wants to create, list, update, or delete tasks → delegate to task_agent
-- For general conversation, respond directly
-- Always confirm completed actions briefly
+async def delegate_to_task_agent(user_message: str) -> dict:
+    """
+    Route a task-management query to the Task Agent via A2A protocol.
 
-EXAMPLES:
-- After creating: "✅ Got it! Created **Task Name** with high priority."
-- After listing: "📋 Here are your tasks:" followed by the formatted list
-- After updating: "✏️ Updated **Task Name** → now marked as done!"
-- After deleting: "🗑️ Removed **Task Name** from your list."
-- If no tasks: "📋 Your task list is empty — looks like a fresh start! Want to add something?"
-""",
-        sub_agents=[task_agent],
-    )
+    Args:
+        user_message: The user's natural language request about tasks.
 
-    session_service = InMemorySessionService()
-    runner = Runner(
-        agent=coordinator,
-        app_name=APP_NAME,
-        session_service=session_service,
-    )
-
-    await session_service.create_session(
-        app_name=APP_NAME,
-        user_id="user",
-        session_id=session_id,
-    )
-
-    user_message = types.Content(
-        role="user",
-        parts=[types.Part(text=message)],
-    )
-
-    response_text = ""
+    Returns:
+        dict with the Task Agent's response.
+    """
     try:
-        async for event in runner.run_async(
-            user_id="user",
-            session_id=session_id,
-            new_message=user_message,
-        ):
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if part.text:
-                        response_text = part.text
-    except ResourceExhausted as e:
-        raise Exception("429 RATE_LIMIT: Gemini API rate limit exceeded.") from e
-    except ServiceUnavailable as e:
-        raise Exception("503 SERVICE_UNAVAILABLE: Gemini unavailable.") from e
+        response = await _run_agent_with_retry(task_agent, user_message)
+        return {"agent": "task_agent", "response": response}
+    except Exception as e:
+        logger.error(f"Task Agent A2A error: {e}")
+        return {"agent": "task_agent", "error": str(e)}
 
-    history_entry = {
-        "user": message,
-        "assistant": response_text,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    agent_session.history = (agent_session.history or []) + [history_entry]
-    agent_session.updated_at = datetime.now(timezone.utc)
-    await db.commit()
 
-    return response_text or "I wasn't able to process that. Please try again."
+async def delegate_to_schedule_agent(user_message: str) -> dict:
+    """
+    Route a schedule/calendar query to the Schedule Agent via A2A protocol.
+
+    Args:
+        user_message: The user's natural language request about schedules, events, or calendar.
+
+    Returns:
+        dict with the Schedule Agent's response.
+    """
+    try:
+        response = await _run_agent_with_retry(schedule_agent, user_message)
+        return {"agent": "schedule_agent", "response": response}
+    except Exception as e:
+        logger.error(f"Schedule Agent A2A error: {e}")
+        return {"agent": "schedule_agent", "error": str(e)}
+
+
+TODAY = date.today().isoformat()
+
+coordinator_agent = Agent(
+    name="coordinator_agent",
+    model=settings.gemini_model,
+    description="Routes user queries to the correct specialist agent.",
+    instruction=f"""You are the Coordinator Agent for the Personal Intelligence Hub.
+Your job is to understand the user's intent and delegate to the correct specialist agent.
+Today's date is {TODAY}.
+
+You have TWO sub-agents available:
+
+1. Task Agent - handles task management: creating, listing, updating, deleting tasks,
+   and anything related to to-dos, work items, or task priorities.
+   Use delegate_to_task_agent for these queries.
+
+2. Schedule Agent - handles calendar and scheduling: creating events, listing events,
+   checking daily schedules, detecting conflicts, and managing appointments/meetings.
+   Use delegate_to_schedule_agent for these queries.
+
+IMPORTANT: When the user says relative dates like "tomorrow", "next Monday", "in 2 hours",
+YOU must convert them to actual dates/times before delegating. Today is {TODAY}.
+
+Routing rules:
+- Keywords like task, todo, to-do, work item, priority, assign -> Task Agent
+- Keywords like schedule, event, meeting, appointment, calendar, book, slot,
+  free time, conflict, daily summary, agenda -> Schedule Agent
+- If unclear, ask the user to clarify.
+- For general greetings or questions, respond directly without delegating.
+
+Always relay the sub-agent's response back to the user clearly and in a friendly way.
+Never ask the user for date formats - figure it out yourself.
+Never make up data - always delegate to the appropriate agent.""",
+    tools=[
+        FunctionTool(func=delegate_to_task_agent),
+        FunctionTool(func=delegate_to_schedule_agent),
+    ],
+)
+
