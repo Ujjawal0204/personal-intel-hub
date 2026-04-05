@@ -8,13 +8,8 @@ from app.database import get_db, AsyncSessionLocal
 from app.models import Task, AgentSession
 from app.config import settings
 import uuid
-import random
-import asyncio
 from fastapi.responses import JSONResponse
 import traceback, logging
-
-_QUERY_MAX_RETRIES = 3
-_QUERY_RETRY_DELAY = 10
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -85,31 +80,7 @@ async def query_agent(
         today = date.today().isoformat()
         message_with_date = f"[Today is {today}] {request.message}"
 
-        response_text = ""
-        for attempt in range(_QUERY_MAX_RETRIES):
-            try:
-                response_text = await _run_agent_with_retry(agent, message_with_date)
-                break
-            except Exception as agent_err:
-                error_str = str(agent_err).lower()
-                if any(k in error_str for k in ["429", "rate", "quota", "resource_exhausted"]):
-                    if attempt < _QUERY_MAX_RETRIES - 1:
-                        delay = _QUERY_RETRY_DELAY * (2 ** attempt) + random.uniform(0, 3)
-                        logger.warning(f"Agent rate limited, retrying in {delay:.1f}s (attempt {attempt+1}/{_QUERY_MAX_RETRIES})")
-                        await asyncio.sleep(delay)
-                        continue
-                    return JSONResponse(status_code=429, content={
-                        "response": "Rate limit reached. Please wait about a minute and try again.",
-                        "session_id": session_id,
-                        "error_type": "rate_limit",
-                    })
-                if any(k in error_str for k in ["unavailable", "503"]):
-                    return JSONResponse(status_code=503, content={
-                        "response": "AI service temporarily unavailable. Please try again shortly.",
-                        "session_id": session_id,
-                        "error_type": "service_unavailable",
-                    })
-                raise
+        response_text = await _run_agent_with_retry(agent, message_with_date)
 
         if not response_text:
             response_text = "I processed your request but have no additional information to share."
