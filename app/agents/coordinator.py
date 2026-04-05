@@ -5,6 +5,7 @@ Multi-agent A2A architecture with retry logic for rate limits.
 
 import logging
 import asyncio
+import random
 from datetime import date
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
@@ -14,8 +15,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 1
-RETRY_DELAY = 5
+MAX_RETRIES = 3
+RETRY_DELAY = 10
 
 
 async def _run_agent_with_retry(agent, message):
@@ -43,8 +44,9 @@ async def _run_agent_with_retry(agent, message):
             error_str = str(e).lower()
             if any(k in error_str for k in ["429", "rate", "quota", "resource_exhausted"]):
                 if attempt < MAX_RETRIES - 1:
-                    logger.warning(f"Rate limited, retrying in {RETRY_DELAY}s (attempt {attempt+1})")
-                    await asyncio.sleep(RETRY_DELAY)
+                    delay = RETRY_DELAY * (2 ** attempt) + random.uniform(0, 3)
+                    logger.warning(f"Rate limited, retrying in {delay:.1f}s (attempt {attempt+1}/{MAX_RETRIES})")
+                    await asyncio.sleep(delay)
                     continue
             raise
     return "Rate limit reached after retries. Please wait a moment."

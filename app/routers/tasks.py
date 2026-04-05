@@ -8,8 +8,13 @@ from app.database import get_db, AsyncSessionLocal
 from app.models import Task, AgentSession
 from app.config import settings
 import uuid
+import random
+import asyncio
 from fastapi.responses import JSONResponse
 import traceback, logging
+
+_QUERY_MAX_RETRIES = 3
+_QUERY_RETRY_DELAY = 10
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,7 +43,6 @@ class QueryRequest(BaseModel):
 @router.post("/query")
 async def query_agent(
     request: QueryRequest,
-    db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_api_key),
 ):
     try:
@@ -50,10 +54,12 @@ async def query_agent(
         session_id = request.session_id or str(uuid.uuid4())
         history = []
 
+        # Load history in a short-lived session before the agent runs
         if request.session_id:
-            agent_session = await db.get(AgentSession, uuid.UUID(request.session_id))
-            if agent_session and agent_session.history:
-                history = agent_session.history
+            async with AsyncSessionLocal() as db:
+                agent_session = await db.get(AgentSession, uuid.UUID(request.session_id))
+                if agent_session and agent_session.history:
+                    history = agent_session.history
 
         session_service = InMemorySessionService()
         runner = Runner(agent=coordinator_agent, app_name="intel_hub", session_service=session_service)
@@ -61,27 +67,34 @@ async def query_agent(
         user_content = Content(parts=[Part(text=request.message)], role="user")
 
         response_text = ""
-        try:
-            async for event in runner.run_async(user_id="user", session_id=adk_session.id, new_message=user_content):
-                if event.is_final_response():
-                    if event.content and event.content.parts:
-                        response_text = event.content.parts[0].text
-                    break
-        except Exception as agent_err:
-            error_str = str(agent_err).lower()
-            if any(k in error_str for k in ["429", "rate", "quota", "resource_exhausted"]):
-                return JSONResponse(status_code=429, content={
-                    "response": "Rate limit reached. Please wait a moment and try again.",
-                    "session_id": session_id,
-                    "error_type": "rate_limit",
-                })
-            if any(k in error_str for k in ["unavailable", "503"]):
-                return JSONResponse(status_code=503, content={
-                    "response": "AI service temporarily unavailable. Please try again shortly.",
-                    "session_id": session_id,
-                    "error_type": "service_unavailable",
-                })
-            raise
+        for attempt in range(_QUERY_MAX_RETRIES):
+            try:
+                async for event in runner.run_async(user_id="user", session_id=adk_session.id, new_message=user_content):
+                    if event.is_final_response():
+                        if event.content and event.content.parts:
+                            response_text = event.content.parts[0].text
+                        break
+                break  # success — exit retry loop
+            except Exception as agent_err:
+                error_str = str(agent_err).lower()
+                if any(k in error_str for k in ["429", "rate", "quota", "resource_exhausted"]):
+                    if attempt < _QUERY_MAX_RETRIES - 1:
+                        delay = _QUERY_RETRY_DELAY * (2 ** attempt) + random.uniform(0, 3)
+                        logger.warning(f"Coordinator rate limited, retrying in {delay:.1f}s (attempt {attempt+1}/{_QUERY_MAX_RETRIES})")
+                        await asyncio.sleep(delay)
+                        continue
+                    return JSONResponse(status_code=429, content={
+                        "response": "Rate limit reached after retries. Please wait a moment and try again.",
+                        "session_id": session_id,
+                        "error_type": "rate_limit",
+                    })
+                if any(k in error_str for k in ["unavailable", "503"]):
+                    return JSONResponse(status_code=503, content={
+                        "response": "AI service temporarily unavailable. Please try again shortly.",
+                        "session_id": session_id,
+                        "error_type": "service_unavailable",
+                    })
+                raise
 
         if not response_text:
             response_text = "I processed your request but have no additional information to share."
@@ -89,18 +102,15 @@ async def query_agent(
         now = datetime.utcnow().isoformat()
         history.append({"user": request.message, "assistant": response_text, "timestamp": now})
 
-        if request.session_id:
-            agent_session = await db.get(AgentSession, uuid.UUID(request.session_id))
+        # Save history in a fresh short-lived session after the agent finishes
+        async with AsyncSessionLocal() as db:
+            agent_session = await db.get(AgentSession, uuid.UUID(session_id))
             if agent_session:
                 agent_session.history = history
             else:
                 agent_session = AgentSession(id=uuid.UUID(session_id), history=history)
                 db.add(agent_session)
-        else:
-            agent_session = AgentSession(id=uuid.UUID(session_id), history=history)
-            db.add(agent_session)
-
-        await db.commit()
+            await db.commit()
 
         return {"response": response_text, "session_id": session_id}
 
