@@ -40,16 +40,34 @@ class QueryRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
 
+_SCHEDULE_KEYWORDS = {
+    "schedule", "event", "meeting", "appointment", "calendar", "book",
+    "slot", "free time", "conflict", "agenda", "standup", "sync",
+    "today", "tomorrow", "next week", "this week",
+}
+_TASK_KEYWORDS = {
+    "task", "todo", "to-do", "to do", "work item", "priority",
+    "assign", "backlog", "ticket", "bug", "feature", "deadline",
+}
+
+def _route(message: str) -> str:
+    """Return 'schedule' or 'task' based on message keywords."""
+    lc = message.lower()
+    s = sum(1 for k in _SCHEDULE_KEYWORDS if k in lc)
+    t = sum(1 for k in _TASK_KEYWORDS if k in lc)
+    return "schedule" if s > t else "task"
+
+
 @router.post("/query")
 async def query_agent(
     request: QueryRequest,
     _: str = Depends(verify_api_key),
 ):
     try:
-        from google.adk.runners import Runner
-        from google.adk.sessions import InMemorySessionService
-        from google.genai.types import Content, Part
-        from app.agents.coordinator import coordinator_agent
+        from app.agents.coordinator import _run_agent_with_retry
+        from app.agents.task_agent import task_agent
+        from app.agents.schedule_agent import schedule_agent
+        from datetime import date
 
         session_id = request.session_id or str(uuid.uuid4())
         history = []
@@ -61,30 +79,27 @@ async def query_agent(
                 if agent_session and agent_session.history:
                     history = agent_session.history
 
-        session_service = InMemorySessionService()
-        runner = Runner(agent=coordinator_agent, app_name="intel_hub", session_service=session_service)
-        adk_session = await session_service.create_session(app_name="intel_hub", user_id="user")
-        user_content = Content(parts=[Part(text=request.message)], role="user")
+        # Route in Python — no LLM call needed for coordination
+        route = _route(request.message)
+        agent = schedule_agent if route == "schedule" else task_agent
+        today = date.today().isoformat()
+        message_with_date = f"[Today is {today}] {request.message}"
 
         response_text = ""
         for attempt in range(_QUERY_MAX_RETRIES):
             try:
-                async for event in runner.run_async(user_id="user", session_id=adk_session.id, new_message=user_content):
-                    if event.is_final_response():
-                        if event.content and event.content.parts:
-                            response_text = event.content.parts[0].text
-                        break
-                break  # success — exit retry loop
+                response_text = await _run_agent_with_retry(agent, message_with_date)
+                break
             except Exception as agent_err:
                 error_str = str(agent_err).lower()
                 if any(k in error_str for k in ["429", "rate", "quota", "resource_exhausted"]):
                     if attempt < _QUERY_MAX_RETRIES - 1:
                         delay = _QUERY_RETRY_DELAY * (2 ** attempt) + random.uniform(0, 3)
-                        logger.warning(f"Coordinator rate limited, retrying in {delay:.1f}s (attempt {attempt+1}/{_QUERY_MAX_RETRIES})")
+                        logger.warning(f"Agent rate limited, retrying in {delay:.1f}s (attempt {attempt+1}/{_QUERY_MAX_RETRIES})")
                         await asyncio.sleep(delay)
                         continue
                     return JSONResponse(status_code=429, content={
-                        "response": "Rate limit reached after retries. Please wait a moment and try again.",
+                        "response": "Rate limit reached. Please wait about a minute and try again.",
                         "session_id": session_id,
                         "error_type": "rate_limit",
                     })
