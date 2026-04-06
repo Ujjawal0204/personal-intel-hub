@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py:*)",
+      "Bash(gcloud run:*)",
+      "Bash(where gcloud:*)",
+      "Read(//c/Users/jaisw/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/**)",
+      "Bash(C:/Users/jaisw/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud run:*)",
+      "Bash(cmd:*)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(powershell:*)",
+      "Bash(Select-String -Pattern \"textPayload|FileNotFoundError|Errno\")",
+      "Bash(Select-String \"textPayload\")"
+    ]
+  }
+}
