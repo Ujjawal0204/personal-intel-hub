@@ -9,7 +9,7 @@ from app.models import Task, AgentSession
 from app.config import settings
 import uuid
 from fastapi.responses import JSONResponse
-import traceback, logging
+import traceback
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

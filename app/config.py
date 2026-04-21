@@ -3,11 +3,8 @@ from functools import lru_cache
 import os
 
 class Settings(BaseSettings):
-    gcp_project_id: str = ""
-    gcp_region: str = "us-central1"
     gemini_model: str = "gemini-2.0-flash"
     api_key: str = "dev-key"
-    env: str = "local"
     database_url_local: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/intel_hub"
     database_url: str = ""
     google_api_key: str = ""

@@ -1,7 +1,7 @@
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
 from app.models import Task
 from app.database import AsyncSessionLocal
 from app.config import settings

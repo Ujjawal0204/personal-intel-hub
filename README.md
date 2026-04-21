@@ -118,7 +118,7 @@ Coordinator relays response → User sees result + Dashboard updates
 |-------|-----------|
 | **AI Framework** | Google ADK (Agent Development Kit) |
 | **Agent Protocol** | A2A (Agent-to-Agent) |
-| **LLM** | Google Gemini 2.5 Flash |
+| **LLM** | Google Gemini 2.0 Flash |
 | **Backend** | Python 3.12, FastAPI, Uvicorn |
 | **Database** | PostgreSQL (async via SQLAlchemy + asyncpg) |
 | **Frontend** | Vanilla HTML/CSS/JS (Single-page app) |
@@ -150,9 +150,7 @@ intel-hub/
 │   └── index.html              # Chat UI + tabbed dashboard
 ├── Dockerfile
 ├── requirements.txt
-├── .env.example
 ├── .gitignore
-├── .gcloudignore
 └── README.md
 ```
 
@@ -198,8 +196,7 @@ CREATE DATABASE intel_hub;
 **5. Configure environment**
 
 ```bash
-cp .env.example .env
-# Edit .env with your database URL and Gemini API key
+# Create a .env file with your database URL and Gemini API key
 ```
 
 **6. Run the server**
@@ -227,7 +224,7 @@ gcloud run deploy intel-hub \
   --image gcr.io/YOUR_PROJECT_ID/intel-hub \
   --region us-central1 \
   --add-cloudsql-instances=YOUR_PROJECT_ID:us-central1:intel-hub-db \
-  --set-env-vars="ENV=cloud,GEMINI_MODEL=gemini-2.5-flash,GOOGLE_API_KEY=your-key,DATABASE_URL=your-db-url,API_KEY=your-api-key"
+  --set-env-vars="GEMINI_MODEL=gemini-2.0-flash,GOOGLE_API_KEY=your-key,DATABASE_URL=your-db-url,API_KEY=your-api-key"
 ```
 
 > **Note**: Always use Dockerfile-based deploy (`gcloud builds submit`), not `gcloud run deploy --source` (Buildpacks crash with TypeError for this project).

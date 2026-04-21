@@ -10,7 +10,13 @@
       "Bash(echo \"exit: $?\")",
       "Bash(powershell:*)",
       "Bash(Select-String -Pattern \"textPayload|FileNotFoundError|Errno\")",
-      "Bash(Select-String \"textPayload\")"
+      "Bash(Select-String \"textPayload\")",
+      "Bash(gcloud.cmd builds:*)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(cmd.exe /c \"cd /d \\\\\"D:\\\\No peeking\\\\intel-hub-new\\\\\" && gcloud builds submit --tag gcr.io/chitragupta-491804/intel-hub\")",
+      "Bash(cmd.exe /c \"cd /d \\\\\"D:\\\\No peeking\\\\intel-hub-new\\\\\" && gcloud.cmd builds submit --tag gcr.io/chitragupta-491804/intel-hub\")",
+      "Bash(cmd.exe /c \"cd /d \\\\\"D:\\\\No peeking\\\\intel-hub-new\\\\\" && gcloud.cmd builds submit --tag \\\\\"gcr.io/chitragupta-491804/intel-hub\\\\\"\")",
+      "Bash(gcloud.cmd run:*)"
     ]
   }
 }
